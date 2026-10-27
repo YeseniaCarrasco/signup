@@ -1,0 +1,17 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local data and secrets
+signup.db
+.secret_key
+.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
