@@ -2,9 +2,52 @@
 {% block content %}
   <h1>Office Hours Sign-Up</h1>
   {% if g.user %}
-    <p>You are logged in as <strong>{{ g.user['username'] }}</strong>.</p>
+    <p>You are logged in as <strong>{{ g.user['username'] }}</strong>{% if g.is_admin %} (administrator){% endif %}.</p>
+
+    <h2>This week</h2>
+    <p class="hint">Office hours are Monday to Friday, 2:00–4:00 pm, in half-hour slots.
+      {% if g.is_admin %}As administrator, you can see who booked each slot.{% endif %}</p>
+    <div class="sheet-wrap">
+      <table class="sheet">
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            {% for day in days %}<th scope="col">{{ day }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in sheet %}
+            <tr>
+              <th scope="row">{{ row.label }}</th>
+              {% for cell in row.cells %}
+                <td class="{{ cell.state }}">
+                  {% if cell.state == "free" %}
+                    <form action="{{ url_for('book') }}" method="post">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="day" value="{{ cell.day }}">
+                      <input type="hidden" name="slot_time" value="{{ cell.slot_time }}">
+                      <button type="submit">Book</button>
+                    </form>
+                  {% elif cell.state == "mine" %}
+                    <span class="status">Your booking</span>
+                    <form action="{{ url_for('cancel') }}" method="post">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="day" value="{{ cell.day }}">
+                      <input type="hidden" name="slot_time" value="{{ cell.slot_time }}">
+                      <button type="submit" class="secondary">Cancel</button>
+                    </form>
+                  {% else %}
+                    <span class="status">{{ cell.name if cell.name else "Taken" }}</span>
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   {% else %}
     <p>No one is logged in.</p>
-    <p><a href="{{ url_for('login') }}">Log in</a> or <a href="{{ url_for('register') }}">create an account</a>.</p>
+    <p><a href="{{ url_for('login') }}">Log in</a> or <a href="{{ url_for('register') }}">create an account</a> to sign up for office hours.</p>
   {% endif %}
 {% endblock %}

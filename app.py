@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import sqlite3
+from functools import wraps
 from pathlib import Path
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
@@ -18,6 +19,10 @@ SALT_BYTES = 16
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 MIN_PASSWORD_LENGTH = 8
+
+# Office hours: Monday–Friday, 2:00–4:00 pm, in half-hour slots
+DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+SLOT_TIMES = ["14:00", "14:30", "15:00", "15:30"]
 
 
 def load_secret_key():
@@ -44,6 +49,7 @@ def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
+        g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
 
@@ -64,6 +70,19 @@ def init_db():
                 password_salt BLOB    NOT NULL,
                 password_hash BLOB    NOT NULL,
                 created_at    TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        # UNIQUE (day, slot_time) guarantees a slot can never be booked twice
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bookings (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                day        INTEGER NOT NULL CHECK (day BETWEEN 0 AND 4),
+                slot_time  TEXT    NOT NULL,
+                user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+                created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (day, slot_time)
             )
             """
         )
@@ -108,11 +127,26 @@ def check_csrf():
 @app.before_request
 def load_user():
     g.user = None
+    g.is_admin = False
     user_id = session.get("user_id")
     if user_id is not None:
         g.user = get_db().execute(
             "SELECT id, username FROM users WHERE id = ?", (user_id,)
         ).fetchone()
+    if g.user is not None:
+        # The first user who registered is the administrator
+        first_id = get_db().execute("SELECT MIN(id) FROM users").fetchone()[0]
+        g.is_admin = g.user["id"] == first_id
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.user is None:
+            flash("Please log in first.", "error")
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
 
 
 def log_in(user_id):
@@ -120,11 +154,102 @@ def log_in(user_id):
     session["user_id"] = user_id
 
 
+# ---------- Sign-up sheet ----------
+
+def format_time(hhmm):
+    hour, minute = map(int, hhmm.split(":"))
+    return f"{hour % 12 or 12}:{minute:02d}"
+
+
+def time_range(slot_time):
+    """'14:30' -> '2:30–3:00 pm' (every slot is in the afternoon)."""
+    hour, minute = map(int, slot_time.split(":"))
+    end = f"{hour + (minute + 30) // 60:02d}:{(minute + 30) % 60:02d}"
+    return f"{format_time(slot_time)}–{format_time(end)} pm"
+
+
+def slot_label(day, slot_time):
+    return f"{DAYS[day]} {time_range(slot_time)}"
+
+
+def parse_slot(form):
+    """Return (day, slot_time) from the form, or abort if it isn't a real slot."""
+    try:
+        day = int(form.get("day", ""))
+    except ValueError:
+        abort(400, "Invalid day.")
+    slot_time = form.get("slot_time", "")
+    if not 0 <= day < len(DAYS) or slot_time not in SLOT_TIMES:
+        abort(400, "Invalid slot.")
+    return day, slot_time
+
+
+def build_sheet():
+    """Rows of the weekly grid: one per time, one cell per day."""
+    rows = get_db().execute(
+        "SELECT b.day, b.slot_time, b.user_id, u.username"
+        " FROM bookings b JOIN users u ON u.id = b.user_id"
+    ).fetchall()
+    booked = {(r["day"], r["slot_time"]): r for r in rows}
+
+    sheet = []
+    for slot_time in SLOT_TIMES:
+        cells = []
+        for day in range(len(DAYS)):
+            b = booked.get((day, slot_time))
+            cell = {"day": day, "slot_time": slot_time, "state": "free", "name": None}
+            if b is not None:
+                cell["state"] = "mine" if b["user_id"] == g.user["id"] else "taken"
+                # Only the administrator sees who booked a slot
+                if g.is_admin:
+                    cell["name"] = b["username"]
+            cells.append(cell)
+        sheet.append({"label": time_range(slot_time), "cells": cells})
+    return sheet
+
+
 # ---------- Routes ----------
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    sheet = build_sheet() if g.user else None
+    return render_template("index.html", days=DAYS, sheet=sheet)
+
+
+@app.route("/book", methods=["POST"])
+@login_required
+def book():
+    day, slot_time = parse_slot(request.form)
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO bookings (day, slot_time, user_id) VALUES (?, ?, ?)",
+            (day, slot_time, g.user["id"]),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        flash(f"Sorry, {slot_label(day, slot_time)} is already taken.", "error")
+    else:
+        flash(f"Booked {slot_label(day, slot_time)}.")
+    return redirect(url_for("index"))
+
+
+@app.route("/cancel", methods=["POST"])
+@login_required
+def cancel():
+    day, slot_time = parse_slot(request.form)
+    db = get_db()
+    # The user_id condition means users can only cancel their own bookings
+    cur = db.execute(
+        "DELETE FROM bookings WHERE day = ? AND slot_time = ? AND user_id = ?",
+        (day, slot_time, g.user["id"]),
+    )
+    db.commit()
+    if cur.rowcount:
+        flash(f"Cancelled your booking for {slot_label(day, slot_time)}.")
+    else:
+        flash("You have no booking in that slot.", "error")
+    return redirect(url_for("index"))
 
 
 @app.route("/register", methods=["GET", "POST"])

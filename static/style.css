@@ -12,3 +12,18 @@ button { padding: 0.5rem; font-size: 1rem; cursor: pointer; }
 button.link { background: none; border: none; padding: 0; text-decoration: underline; font: inherit; }
 .flash { padding: 0.5rem 0.75rem; background: #e6f4ea; border-left: 4px solid #2e7d32; }
 .flash.error { background: #fdecea; border-left-color: #c62828; }
+
+/* Sign-up sheet */
+main:has(.sheet) { max-width: 60rem; }
+.hint { color: #555; }
+.sheet-wrap { overflow-x: auto; }
+.sheet { border-collapse: collapse; width: 100%; min-width: 40rem; background: #fff; }
+.sheet th, .sheet td { border: 1px solid #ddd; padding: 0.5rem; text-align: center; }
+.sheet thead th { background: #f0f0f0; }
+.sheet tbody th { white-space: nowrap; font-weight: normal; }
+.sheet td form { display: block; }
+.sheet td button { width: 100%; padding: 0.35rem; font-size: 0.9rem; }
+.sheet td.taken { background: #f2f2f2; color: #666; }
+.sheet td.mine { background: #e6f4ea; }
+.sheet .status { display: block; font-size: 0.9rem; margin-bottom: 0.25rem; }
+button.secondary { background: #fff; border: 1px solid #999; }
